@@ -43,7 +43,7 @@ public:
     }
 };
 
-int SPHERE_LOCATIONS[] = {
+int SPHERE_LOCATIONS_DATA[] = {
     247570,
     280596,
     280600,
@@ -59,49 +59,53 @@ float R() {
     return static_cast<float>(rand()) / RAND_MAX;
 }
 
-const auto SPHERES_CENTRAL_POINT = vec3(0, 0, 4);
-const auto SPHERE_RADIUS = 0.5f;
-
+constexpr auto SPHERE_RADIUS = 1.0f;
 constexpr auto INTERSECT_TYPE_UPWARD = 0;
 constexpr auto INTERSECT_TYPE_DOWNWARD = 1;
 constexpr auto INTERSECT_TYPE_SPHERE = 2;
 
-int T(const vec3 rayOrigin, const vec3 rayDirection, float &t, vec3 &newDirection) {
+const auto SPHERES_CENTRAL_POINT = vec3(0, 0, 4);
+
+int ComputeSphereIntersect(const vec3 origin, const vec3 direction, float &t, vec3 &sphereIntersect) {
     t = MAXFLOAT;
     int intersectType = INTERSECT_TYPE_UPWARD;
 
-    const float condition1 = -rayOrigin.z / rayDirection.z;
+    const float zRatio = -(origin.z / direction.z);
 
-    if (condition1 > .01) {
-        t = condition1;
-        newDirection = vec3(0, 0, 1);
+    if (zRatio > .01) {
+        t = zRatio;
+        sphereIntersect = vec3(0, 0, 1);
         intersectType = INTERSECT_TYPE_DOWNWARD;
     }
 
     for (int j = 0; j < 9; j++) {
         for (int k = 0; k < 20; k++) {
-            bool hasSphereInLocation = SPHERE_LOCATIONS[j] & 1 << k;
+            bool hasSphereInSphereLocationsData = SPHERE_LOCATIONS_DATA[j] & 1 << k;
 
-            if (!hasSphereInLocation) {
+            if (!hasSphereInSphereLocationsData) {
                 continue;
             }
 
-            const auto sphereCenter = vec3(static_cast<float>(k), 0, static_cast<float>(j));
+            const auto sphereCenterSphereCoordinates = vec3(static_cast<float>(k), 0, static_cast<float>(j));
+            const auto sphereCenter = SPHERES_CENTRAL_POINT + sphereCenterSphereCoordinates;
 
-            auto rayFromRayOriginToSphereCenter = rayOrigin - SPHERES_CENTRAL_POINT - sphereCenter;
+            auto rayFromRayOriginToSphereCenter = origin - sphereCenter;
 
-            const float b = rayFromRayOriginToSphereCenter % rayDirection;
-            const float q = b * b - (rayFromRayOriginToSphereCenter % rayFromRayOriginToSphereCenter - SPHERE_RADIUS);
+            const float a = direction % direction;
+            const float b = 2 * (rayFromRayOriginToSphereCenter % direction);
+            const float c = rayFromRayOriginToSphereCenter % rayFromRayOriginToSphereCenter - SPHERE_RADIUS;
 
-            if (q <= 0) {
+            const float determinant = b * b - (4 * a * c);
+
+            if (determinant <= 0) {
                 continue;
             }
 
-            float s = -static_cast<float>(b + sqrt(q));
+            const auto s = static_cast<float>(-(b + sqrt(determinant))/2);
 
             if (s < t && s > .01) {
                 t = s;
-                newDirection = !(rayFromRayOriginToSphereCenter + rayDirection * t);
+                sphereIntersect = !(rayFromRayOriginToSphereCenter + direction * t);
                 intersectType = INTERSECT_TYPE_SPHERE;
             }
         }
@@ -117,44 +121,47 @@ const auto HORIZON_COLOR = vec3(.1, .9, .4);
 
 constexpr auto BOUNCE_ATTENUATION = 0.7;
 constexpr auto HORIZON_ATTENUATION_EXP = 3;
-constexpr auto FLOOR_TILING_SCALE_FACTOR = .2;
+constexpr auto FLOOR_TILING_X_SCALE_FACTOR = .002;
+constexpr auto FLOOR_TILING_Y_SCALE_FACTOR = .002;
 
 vec3 SampleRay(const vec3 origin, const vec3 direction) {
     float t;
-    vec3 nextDirection;
+    vec3 sphereIntersect;
 
-    int intersectType = T(origin, direction, t, nextDirection);
+    const int intersectType = ComputeSphereIntersect(origin, direction, t, sphereIntersect);
 
     if (intersectType == INTERSECT_TYPE_UPWARD) {
         return HORIZON_COLOR * pow(1 - direction.z, HORIZON_ATTENUATION_EXP);
     }
 
-    vec3 h = origin + direction * t;
+    const vec3 intersect = origin + direction * t;
 
-    const vec3 l = !(LIGHT_POSITION - h);
+    const vec3 rayFromLightPositionToSphereIntersect = !(LIGHT_POSITION - intersect);
 
-    const vec3 r = direction + nextDirection * (nextDirection % direction * -2);
-
-    float b = l % nextDirection;
+    float b = rayFromLightPositionToSphereIntersect % sphereIntersect;
 
     if (b < 0) {
         b = 0;
     }
 
-    if (T(h, l, t, nextDirection) != 0) {
+    if (ComputeSphereIntersect(intersect, rayFromLightPositionToSphereIntersect, t, sphereIntersect) != 0) {
         b = 0;
     }
 
     if (intersectType == INTERSECT_TYPE_DOWNWARD) {
-        return (static_cast<int>(ceil(h.x * FLOOR_TILING_SCALE_FACTOR) + ceil(h.y * FLOOR_TILING_SCALE_FACTOR)) & 1
-                    ? FLOOR_COLOR_ONE
-                    : FLOOR_COLOR_TWO) * (b * .2 + .1);
+        const float floatBounceAttenuation = b * .2 + .1;
+
+        auto floorMappingValue = static_cast<int>(ceil(intersect.x * FLOOR_TILING_X_SCALE_FACTOR) + ceil(intersect.y * FLOOR_TILING_Y_SCALE_FACTOR));
+
+        return (floorMappingValue % 2 ? FLOOR_COLOR_ONE : FLOOR_COLOR_TWO) * floatBounceAttenuation;
     }
 
-    float p = pow(l % r * (b > 0), 99);
+    const vec3 r = direction + sphereIntersect * (sphereIntersect % direction * -2);
+
+    const float p = pow(rayFromLightPositionToSphereIntersect % r * (b > 0), 20);
 
     // other intersect type
-    return vec3(p, p, p) + SampleRay(h, r) * BOUNCE_ATTENUATION;
+    return vec3(p, p, p) + SampleRay(intersect, r) * BOUNCE_ATTENUATION;
 }
 
 constexpr auto N_ITERATIONS = 64;
@@ -184,10 +191,10 @@ int main() {
             for (int r = 0; r < N_ITERATIONS; r++) {
                 vec3 delta = cameraUpVector * (R() - .5) * 99 + rightVector * (R() - .5) * 99;
 
-                vec3 aaa = cameraOrigin + delta;
+                vec3 cameraOriginWithRandomDelta = cameraOrigin + delta;
                 vec3 bbb = !(delta * -1 + (cameraUpVector * (R() + static_cast<float>(x)) + rightVector * (static_cast<float>(y) + R()) + c) * 16);
 
-                p = p + SampleRay(aaa, bbb) * 3.5;
+                p = p + SampleRay(cameraOriginWithRandomDelta, bbb) * 3.5;
             }
 
             printf("%c%c%c", static_cast<int>(p.x), static_cast<int>(p.y), static_cast<int>(p.z));
