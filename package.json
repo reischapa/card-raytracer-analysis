@@ -1,0 +1,11 @@
+{
+  "name": "aaa",
+  "version": "1.0.0",
+  "description": "https://fabiensanglard.net/rayTracing_back_of_business_card/",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
